@@ -51,8 +51,8 @@ def Simplex(lp):
 	basis = []
 	lbls = []
 	tableau = []
-	av = 1
-	sv = 1
+	av = 1  # tracks number of augmenting variables
+	sv = 1  # tracks number of slack variables
 	''' Set line 1 to the augmented objective
 	    and line 2 to the original objective '''
 	tableau.append(np.zeros(lp.c.shape[0]))
@@ -72,15 +72,20 @@ def Simplex(lp):
 	''' add slack and auxillery variables '''
 	tableau = np.array(tableau)
 	for idx, rule in enumerate(lp.rules):
-		if (rule[1] == "<="):
+	
+		#Slack Variables are based on the constraint type.
+		if (rule[1] == "<="):  
+		#requires just a slack variable.
 			lbls.append(['s',idx,sv])
 			basis.append(['s',idx,sv])
 			sv += 1
 			tableau = np.c_[tableau, np.zeros(lp.constraints + 2)]
 			tableau[idx+2][tableau.shape[1] - 1] = 1
 			rule[1] = "="
-		elif (rule[1] == ">="):
 			
+			
+		elif (rule[1] == ">="):
+		#requires a slack variable and and augmenting variable
 			lbls.append(['s',idx,sv])
 			sv += 1
 			tableau = np.c_[tableau, np.zeros(lp.constraints + 2)]
@@ -93,6 +98,7 @@ def Simplex(lp):
 			tableau[0][tableau.shape[1] - 1] = 1
 			rule[1] = "="
 		elif (rule[1] == "="):
+			#requires an augmenting variable.
 			lbls.append(['a',idx,av])
 			basis.append(['a',idx,av])
 			tableau = np.c_[tableau, np.zeros(lp.constraints + 2)]
@@ -101,10 +107,11 @@ def Simplex(lp):
 			av += 1
 			
 	
-	b = [0,0]
+	b = [0,0] # b need to have 0 in the objective rows.
 	for rule in lp.rules:
 		b.append(rule[2])
 	b = np.array(b)
+	''' Augment the matrix with b '''
 	tableau = np.c_[tableau, b]
 	
 	if(av > 1):
@@ -112,45 +119,76 @@ def Simplex(lp):
 			if (var[0] == 'a'):
 				tableau[0] -= tableau[var[1]+2]
 		
-		print(tableau)
-		print(basis)
-		
 		pcol = pivot_col(tableau)
-		prow = pivot_row(tableau,pcol)
-		print(pcol)
-		print(prow)
-		basis[prow-2] = lbls[pcol]
+		prow = pivot_row(tableau,pcol,2)
+		if (prow > 2):
+			basis[prow-2] = lbls[pcol]
 		
-		while((pcol != -1) & (prow != -1)):
+		''' Apply Simplex ''' 
+		while((pcol != -1) and (prow != -1)):
 			perform_pivot(pcol,prow,tableau)
 			pcol = pivot_col(tableau)
-			prow = pivot_row(tableau,pcol)
-			basis[prow-2] = lbls[pcol]
+			prow = pivot_row(tableau,pcol,2)
+			if (prow > 2):
+				basis[prow-2] = lbls[pcol]
+		print(tableau)
+		print(prow)
+		print(pcol)
 		if (prow == -1):
 			print("PROBLEM HAS NO OPTIMAL SOLUTION")
 			print("Certificate: " , end='')
 			print(basis)
 			return basis
 		if (pcol == -1):
-			print("OPTIMAL BASIS FOUND FOR AUXILLERY PROBLEM")
-			print("STARTING PHASE TWO")
-			
+			if (tableau[0][tableau.shape[1]-1] != 0):
+				print("Impossible problem")
+				return basis
+			else:
+				print("OPTIMAL BASIS FOUND FOR AUXILLERY PROBLEM")
+				print("STARTING PHASE TWO")
+				print("Starting Basis: " , end='')
+				print(basis)
+	
 	if (av == 1):
 		print("AUXILLERY PROBLEM NOT REQUIRED")
 		print("STARTING PHASE TWO")
 		print("Starting Basis: " , end='')
 		print(basis)
-	print(basis)
-	#print(lbls)
-	#print(tableau)
-
-
-
-
-
-
-
-
+	else:		
+		#During this section the auxillery variables are removed
+		to_del = []
+		lbls_p2 = []
+		for idx,lbl in enumerate(lbls):
+			if (lbl[0] == 'a'):
+				to_del.append(idx)
+			else:
+				lbls_p2.append(lbl)
+		tableau = np.delete(tableau, 0, 0)
+		tableau = np.delete(tableau, to_del, 1)
+		lbls = lbls_p2
+	
+	pcol = pivot_col(tableau)
+	prow = pivot_row(tableau,pcol,1)
+	if (prow > 2):
+			basis[prow-2] = lbls[pcol]
+	
+	''' Perform Simplex '''
+	while((pcol != -1) and (prow != -1)):
+		perform_pivot(pcol,prow,tableau)
+		pcol = pivot_col(tableau)
+		prow = pivot_row(tableau,pcol,1)
+		if (prow > 2):
+			basis[prow-2] = lbls[pcol]
+	
+	if (prow == -1):
+		print("PROBLEM IS UNBOUNDED")
+		print("Certificate: " , end='')
+		print(basis)
+		return basis
+	if (pcol == -1):
+		print("OPTIMAL BASIS FOUND")
+		print("Optimal Basis: " , end='')
+		print(basis)
 
 
 
@@ -160,23 +198,23 @@ def pivot_col(tableau):
 	min_col = -1
 	min_val = 1
 	for idx, col in enumerate(tableau[0]):
-		if ((col < 0) & (col < min_val) & (idx != tableau.shape[1] - 1)):
+		if ((col < 0) and (col < min_val) and (idx != tableau.shape[1] - 1)):
 			min_col = idx
 			min_val = col
 	return min_col
 	
 ''' Locates the row on which the tableau should pivot
     return -1 if the problem is unbounded '''	
-def pivot_row(tableau,col):
+def pivot_row(tableau,col,start):
 	if (col == -1):
 		return -2
 	height = tableau.shape[0]
 	length = tableau.shape[1]
 	min_row = -1
 	min_val = -1
-	for row in range(2,height):
+	for row in range(start,height):
 		if (tableau[row][col] != 0):
-			if ((tableau[row][col] != 0) & (tableau[row][length - 1] / tableau[row][col] > 0) & (tableau[0][row] < min_val)):
+			if ((tableau[row][col] != 0) and (tableau[row][length - 1] / tableau[row][col] > 0) and ((tableau[row][length - 1] / tableau[row][col] < min_val) | (min_val == -1))):
 				min_row = row
 				min_val = tableau[row][length - 1] / tableau[row][col]
 	return min_row
@@ -211,9 +249,19 @@ test.add_constraint(np.array([5,0,5,5]),">=",50)
 
 
 test2 = LP(np.array([-1,2,3,1,1]),"max")
-test2.add_constraint(np.array([0,1]),"<=",10)
-test2.add_constraint(np.array([1,0]),"<=",10)
+test2.add_constraint(np.array([0,1,1,1,1]),"<=",10)
+test2.add_constraint(np.array([1,0,1,1,1]),"=",10)
 #test2.print_lp()
 
-Simplex(test)
-Simplex(test2)
+test3 = LP(np.array([-1,2,3,1,1]),"max")
+test3.add_constraint(np.array([0,1,0,0,0]),"<=",10)
+test3.add_constraint(np.array([1,0,0,0,0]),"=",10)
+#test3.print_lp()
+
+test4 = LP(np.array([1,1]),"max")
+test4.add_constraint(np.array([1,0]),"<=",2)
+test4.add_constraint(np.array([1,0]),">=",10)
+#test4.print_lp()
+
+#Simplex(test)
+Simplex(test4)
